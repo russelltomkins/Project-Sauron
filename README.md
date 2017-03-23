@@ -1,4 +1,8 @@
-Welcome to Project Sauruon. The purpose of these project is to provide organisations without access to expenseive SEM/SIEM platforms to export event log audit data from multiple Windows machines to a central location. Also ideal for deployment in UAT/DEV/TEST environments to allow collection of events. The demonstration example which began this project was to provide a process to allow Domain Controllers to centrally store the audit events they generate for future referral and lookups.
+Welcome to Project Sauron. 
+
+The purpose of these project is to provide organisations without access to expenseive SEM/SIEM platforms to export Windows event log audit data from multiple Windows machines to a central location using built-in Windows functionality. The solution is also ideal for deployment in UAT/DEV/TEST environments that aren't currently covered by production SEM/SIEM deployments.
+
+The catalyst for this project and primary working example was to provide a mechanism to allow Domain Controllers to centrally store and archive the large number of audit events they generate for archival and lookup purposes.
 
 The 3 core components can be leveraged to allow you to build your own solutions as well. 
   Custom View Creation - Create a custom view tree that allows you to easily extract specific events 
