@@ -4,21 +4,25 @@ The purpose of these project is to provide organisations without access to expen
 
 The catalyst for this project and primary working example was to provide a mechanism to allow Domain Controllers to centrally store and archive the large number of audit events they generate for archival and lookup purposes.
 
-The 3 core components can be leveraged to allow you to build your own solutions as well. 
+The 4 core scripts can be used to build your own solutions as well.
   Custom View Creation - Create a custom view tree that allows you to easily extract specific events 
   Manifest Creation - Creates an event channel manifest file for .dll compilation to create dedicated event channels (logs) for storage of events in management .evtx files
+  Event Channel Preparation - Enables the custom event channels, configures their default size and enables auto-archive.
   Subscription Creation - Creates the windows event collection subscription files to forward and store events in the appproiate log file.
 
-Getting Started - Domain Controller Events 
-A Pre-Built version of the Manifest and DLL is available and directly matches up to the provided Custom Subscriptions, Custom Views and export scripts. Refer to the following blog post for more details
+Getting Started - DC Events 
+Some people will happily just use the pre-provided solution and thats cool. Check out the latest release for pre-compiled Custom Views, Event Channel manifest and DLL that can quickly be used.
+
+Refer to the following blog post for more details
 http://blogs.technet.microsoft.com/russellt/2017/03/23/project-sauron-part-1
 
 1. Create or use an existing import csv to definie the custom event channels and xPath queries
 2. Compile a new or reuse an existing .manifest and .dll file to define the custom event channels
 3. Load the custom events channel .manifest and .dll into your Windows Event Collector
-4. Load your the correspondign WEC subscriptions into the central Windows Event Collector Server
-5. Configure the machines to pull subscriptions from the WEC Subscription server
-6. Refer to the event logs 
+4. Prepare the event channels 
+5. Load your the correspondign WEC subscriptions into the central Windows Event Collector Server
+6. Configure the machines to pull subscriptions from the WEC Subscription server
+7. Begin leveraging your new centralised event logs.
 
 Domain Controller Event Data Sources
 Account Management https://technet.microsoft.com/en-us/library/dd941622(v=ws.10).aspx
