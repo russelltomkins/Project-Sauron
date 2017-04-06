@@ -1,27 +1,28 @@
 <#
   .SYNOPSIS
   Name: Create-Subscriptions.ps1
-  Version: 1.0
+  Version: 1.1
   Author: Russell Tomkins - Microsoft Premier Field Engineer
   Blog: https://aka.ms/russellt
 
-  Bulk creation of Windows Event Collection Subscriptions from  input CSV
+  Bulk creation of Windows Event Collection Subscriptions from an input CSV
   Source: https://www.github.com/russelltomkins/ProjectSauron
 
   .DESCRIPTION
   Leverages an input CSV file to bulk create WEC subscriptions for event delivery
-  to dedicated custom event channels
+  to dedicated custom event channels. Subscriptions are imported by disabled by default.
+  Use the -NoImport and -CreateEnabled switches to override the behaviour.
 
   Refer to this blog series for more details
   http://blogs.technet.microsoft.com/russellt/2017/03/23/project-sauron-part-1
 
   .EXAMPLE
-  Create, Import and Enable the WEC subscriptions.
+  Create and Import the WEC subscriptions (disabled by default)
   Create-Subscriptions.ps1 -InputFile DCEvents.csv 
   
   .EXAMPLE
-  Create, Import but don't enable the WEC subscriptions
-  Create-Subscriptions.ps1 -InputFile <inputfile.csv> -CreateDisabled
+  Create, Import and force enable the WEC subscriptions
+  Create-Subscriptions.ps1 -InputFile <inputfile.csv> -CreateEnabled
 
   .EXAMPLE
   Only create the WEC subscription files, do not import them.
@@ -30,14 +31,11 @@
   .PARAMETER InputFile
   A CSV file which must include a ChannelName, ChannelSymbol, QueryPath and the xPath Query itself  
   
-  .PARAMETER LogRootPath
-  The location of .evtx event log files. Defaults to "D:\Logs"  
-
-  .PARAMETER OutputFile
-  The location of the output subscription .xml files. Defaults to "D:\Logs"  
+  .PARAMETER OutputFolder
+  The location of the output subscription .xml files. Defaults to "\Subscriptions" under the current folder
   
-  .PARAMETER CreateDisabled
-  Creates and imports the subscriptions, but does not enable it
+  .PARAMETER CreateEnabled
+  Creates and imports the subscriptions but enables them immediately.
 
   .PARAMETER NoImport
   Creates the subscriptions files, but does not import them
@@ -69,20 +67,20 @@
 [CmdletBinding()]
     Param (
     [Parameter(Mandatory=$true)][ValidateNotNullOrEmpty()][String]$InputFile,
-    [Parameter(Mandatory=$false)][String]$LogRootPath="D:\Logs",
     [Parameter(Mandatory=$false)][string]$OutputFolder=$PWD,
-    [Parameter(Mandatory=$false)][Switch]$CreateDisabled,
-	[Parameter(Mandatory=$false)][Switch]$NoImport)
+    [Parameter(Mandatory=$false)][Switch]$CreateEnabled,
+    [Parameter(Mandatory=$false)][Switch]$NoImport)
+
+# Configure and Start the Windows Event Collector Services except if we are not importing.
+If (!($NoImport)){
+	# Prepare and Start the Windows Event Collector Service
+	$WECService = Get-Service "Windows Event Collector"
+	$WECService | Set-Service -StartupType "Automatic"
+	$WECService | Start-Service
+}
 
 # Import our Custom Events
 $CustomChannels = Import-CSV $InputFile
-
-# Create and ACL the Log Roots Folder to allow Network Service access.
-If(!(Test-Path $LogRootPath )){New-Item -Type Directory $LogRootPath}
-$ACE = New-Object System.Security.AccessControl.FileSystemAccessRule("NETWORK SERVICE",'Modify','ContainerInherit,ObjectInherit','None','Allow')
-$LogRootPathACL = (Get-Item $LogRootPath) | Get-ACL
-$LogRootPathACL.AddAccessRule($ACE)
-$LogRootPathACL | Set-ACL
 
 # Loop through Chanel in input events.
 ForEach($Channel in $CustomChannels){	
@@ -91,27 +89,19 @@ ForEach($Channel in $CustomChannels){
 	# Bind to the Event Channel
 	$EventChannel = Get-WinEvent -ListLog $Channel.ChannelName
 
-	# Disable the channel to allow changes
-	If ($EventChannel.IsEnabled) {
-		$EventChannel.IsEnabled = $False
-		$EventChannel.SaveChanges()
+	# Do not proceed if we are importing and the logs are still disabled.
+	If(!($NoImport)) {
+		If (!($EventChannel.IsEnabled)) {
+			Write-Host "Error: Event Channel is not Enabled" -Foregroundcolor "Red" -BackGroundColor "Black"
+			Write-host "Execute `"Prepare-EventChannels.ps1`" to configure them prior to creating event subscriptions"-Foregroundcolor "Red" -BackGroundColor "Black"
+		Exit
+		}
 	}
-	
-	# Update the channel to our requried Values
-	$NewLogFilePath = $LogRootPath + "\" + $Channel.ChannelSymbol + ".evtx"
-	$EventChannel.LogFilePath = $NewLogFilePath
-	$EventChannel.LogMode = "AutoBackup"
-	$EventChannel.MaximumSizeInBytes = 1073741824
-	$EventChannel.SaveChanges()
-	
-	# Enable the Log
-	$EventChannel.IsEnabled = $True	
-	$EventChannel.SaveChanges()
 	
 	# --- Create the Subscription XML's
 	# Pre-pend the current Folder path and create the SubFolders
 	$SubscriptionNamePath = $OutputFolder + "\Subscriptions"
-	If(!(Test-Path $SubscriptionNamePath)){New-Item -Type Directory $SubscriptionNamePath}
+	If(!(Test-Path $SubscriptionNamePath)){New-Item -Type Directory $SubscriptionNamePath | Out-Null}
 	
 	# Create our new XML File	
 	$xmlFilePath = $SubscriptionNamePath + "\" + $Channel.ChannelSymbol + ".xml"
@@ -131,11 +121,11 @@ ForEach($Channel in $CustomChannels){
 	$xmlWriter.WriteElementString("SubscriptionId",$Channel.ChannelSymbol)
 	$xmlWriter.WriteElementString("SubscriptionType","SourceInitiated")
 	$xmlWriter.WriteElementString("Description",$Channel.ChannelName)
-	If($CreateDisabled){
-		$xmlWriter.WriteElementString("Enabled","false")
+	If($CreateEnabled){
+		$xmlWriter.WriteElementString("Enabled","true")
 	}
 	Else{ 
-		$xmlWriter.WriteElementString("Enabled","true")
+		$xmlWriter.WriteElementString("Enabled","false")
 	}
 	$xmlWriter.WriteElementString("Uri","http://schemas.microsoft.com/wbem/wsman/1/windows/EventLog")
 	$xmlWriter.WriteElementString("ConfigurationMode","Custom")
@@ -183,6 +173,7 @@ ForEach($Channel in $CustomChannels){
 
 	# Import the subscription to the server
 	If(!($NoImport)){
+			
 		# Import the subscription to the server
 		$command = "C:\Windows\System32\wecutil.exe"
 		$action = "create-subscription"
@@ -192,18 +183,19 @@ ForEach($Channel in $CustomChannels){
 
 # If we didn't import, write out how to import manually
 If($NoImport){
-	write-Host "Event Channels updated with required settings"
 	write-Host "Subscription files located at $SubscriptionNamePath"
-	write-host "Import with wecutil.exe create-subscription <subscription-name>.xml"}
-
+	write-host "Import with `"wecutil.exe create-subscription <subscription-name>.xml`""}
+Else{
+	write-Host "Event Channels created and imported. Use Event Viewer to enable subscriptions."
+}
 # -----------------------------------------------------------------------------------
 # End of Script
 # -----------------------------------------------------------------------------------
 # SIG # Begin signature block
 # MIIgVAYJKoZIhvcNAQcCoIIgRTCCIEECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC0Osw/1T4Td6An
-# uktM5rKr0UFEp2V+3sHBob/Pz2ZvRKCCG14wggO3MIICn6ADAgECAhAM5+DlF9hG
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDmRTCSV+qfcL+6
+# pOqLspQirwP7zaAf9qnDaQCuzmm48qCCG14wggO3MIICn6ADAgECAhAM5+DlF9hG
 # /o/lYPwb8DA5MA0GCSqGSIb3DQEBBQUAMGUxCzAJBgNVBAYTAlVTMRUwEwYDVQQK
 # EwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xJDAiBgNV
 # BAMTG0RpZ2lDZXJ0IEFzc3VyZWQgSUQgUm9vdCBDQTAeFw0wNjExMTAwMDAwMDBa
@@ -355,22 +347,22 @@ If($NoImport){
 # U2lnbmluZyBDQQIQDhlON30mOhkOirPIWrUoYzANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCDk1IB2qVR9RaXlfijXEmFLt+9dHQ5rQkHDcaX4FmgzfjANBgkqhkiG9w0BAQEF
-# AASCAQByFSrKaw/KQws3vuIHuFkP8ed1mb/ZKExVBKACbvX8d5XjZXLfQMtWXKtP
-# wsRV2vDpsDJRzE5iqjpGNwRTMflRprkwU0MgpFpZd3VzUX+9PlXPUin/H07Ik8Kv
-# djn7YzppOMvx7UTeBbMLhMJPJsnaISyffCgeBtEU1zi1I0Fkwy3fUS8Q4A3klQJd
-# pWhgUr9esMMr7YQo0z58T4Qhz4EZyLSyrxKhwuxg+belv6/dClgqxdXB9cqge3/2
-# J14Pkp2ih2VJy6w+oKfu0G4dp1C/Neh/zzNsjGx5YfwYo1yQKnHnp4YZ9X/oNrwH
-# DJooWpB+uwngpFsyd3LKFm1tErhAoYICDzCCAgsGCSqGSIb3DQEJBjGCAfwwggH4
+# BCBdRdQcl3uoARDQBCqg/cwdZleMA9onGTt8ho1IDiiCqDANBgkqhkiG9w0BAQEF
+# AASCAQB82JthTsuUn9nAfJm4u94njOdCcya64ThMcwTw6gjtOMmW8lys7gnoxCvB
+# hOBF+DVlOcBp0LUMN4yYZM8M9HxSjZTdQ0efzcEQZRfnhF5MvRyWSwnfG+dhaC2U
+# 26WTx3F9CPiJhZlbbC13jcZmlkGmP+5tY7kXnn+QTIqO9KO4Se9BYkRR8u4lH5JS
+# 3NwEzvyWauHblG5jpAY6gGGb63xl/bC1lc2NEkcRwE+bkPjPyp8k4P4CjGsseouJ
+# VuLqLv8PP2nk1SAoYzTPj3qPLPhi9UuLV9rk4AWTLPbro1qbrGim0LAS9ccKknBG
+# 9NCZa6tmIVjcW5Lql7UKsjmn6wlnoYICDzCCAgsGCSqGSIb3DQEJBjGCAfwwggH4
 # AgEBMHYwYjELMAkGA1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcG
 # A1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8GA1UEAxMYRGlnaUNlcnQgQXNzdXJl
 # ZCBJRCBDQS0xAhADAZoCOv9YsWvW1ermF/BmMAkGBSsOAwIaBQCgXTAYBgkqhkiG
-# 9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0xNzAzMjgwMTE2NDZa
-# MCMGCSqGSIb3DQEJBDEWBBT9yDxcEWrXneHdE8PrXR3ZC/CcrDANBgkqhkiG9w0B
-# AQEFAASCAQBMCoNP712CMHL+XJV/OIkJrpashiwLxFPL6KKyggEfcKwRA5k2zNSz
-# Mt3B8UiOyl9Qocmxex7T0rwGxRxrcSgFYlKwSngdAKqABTzApFaXzZ6NAhn9eJAd
-# zYql9frJD2sAam9My5MhMoGqwbYlKlLlTas1j/maimIZm9/JGgpLqKOBxxKRjF+G
-# O+RXU38IZW0DjL64UAKXzB/C9Ybns3R2JYzhwdy5fxGnKb4JLVsV6IiM/oLtAMv9
-# Y2FgI9pz0CU6NGsM/eo1thaMNcN3zU2CpcOryiLEHH51t3z5O53aZ5oXHLBG6c5Q
-# xGQyvvmL3sBDQcpl/SfhASHvTwlkLdCw
+# 9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0xNzA0MDYxMjAwNTNa
+# MCMGCSqGSIb3DQEJBDEWBBQUSafeu49EHQNcvAKNKKEXcURbrjANBgkqhkiG9w0B
+# AQEFAASCAQBt8bsMZ+lx7gSEFFX1I3cRmEsv7JmDxsE8z/SJDd/l9Ua2Tf6hnTnl
+# U6hhIV7VQAEDLq9CaATkug3QjykqDYRWOWHAKZz3ngSulxfN/AQLrZP1tLByxfxW
+# 8pCinR0sIO+jggioo1EcMJeajEEtUrWJU/280MWcEgs8ghlQedfoDPMxxoWwBZv9
+# 2ovdiXp4qTkvq0bMEt/p19doeYeQJC68cFUob2l3MN4bvkFW1AmrmhuRvr3VckY+
+# GglJxeANfnFKHHwjsi6WEWzNY2m7SJUwuaF7PrcAi2eNq9t2rMUpQrBts6xlfrbw
+# 9lOStks/uV58iNSRQfFxEqX1lSHbkO5O
 # SIG # End signature block

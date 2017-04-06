@@ -1,34 +1,28 @@
 <#
   .SYNOPSIS
-  Name: Create-Manifest.ps1
+  Name: Prep-EventChannels.ps1
   Version: 1.1
   Author: Russell Tomkins - Microsoft Premier Field Engineer
   Blog: https://aka.ms/russellt
 
-  Creates a custom event channel manifest file from input CSV 
+  Preparation of event channels to receive event collection subscriptions from an input CSV
   Source: https://www.github.com/russelltomkins/ProjectSauron
 
   .DESCRIPTION
-  Leverages an input CSV file to create the required Manifest file for .dll compilation
-  Once compiled, can be loaded into a Windows Event Collector to allow custom forwarding
-  and long term storage of events.
+  Leverages an input CSV file to prepare the custom event channels created by Create-Manifest.ps1
 
   Refer to this blog series for more details
   http://blogs.technet.microsoft.com/russellt/2017/03/23/project-sauron-part-1
 
   .EXAMPLE
-  Creates the Manfifest file to compile
-  Create-Manifest.ps1 -InputFile DCEvents.csv 
-
-  .EXAMPLE
-  Creates the Manfifest file to compile along with where the DLL will be located on the WEC server
-  Create-Manifest.ps1 -InputFile DCEvents.csv -DLLPath "C:\CustomDLLPath" 
-
+  Prepare the Event Chanenls using the Input CSV file.
+  Create-Subscriptions.ps1 -InputFile DCEvents.csv 
+  
   .PARAMETER InputFile
-  A CSV file which must include a ProviderSymbol,ProviderName and ProviderGuid  
-   
-  .PARAMETER DLLPath
-  The folder path where the .dll containing the custom event channels that Windows will load  
+  A CSV file which must include a ChannelName, ChannelSymbol, QueryPath and the xPath Query itself  
+  
+  .PARAMETER LogRootPath
+  The location of .evtx event log files. Defaults to "D:\Logs"  
 
   LEGAL DISCLAIMER
   This Sample Code is provided for the purpose of illustration only and is not
@@ -52,103 +46,66 @@
 # -----------------------------------------------------------------------------------
 # Main Script
 # -----------------------------------------------------------------------------------
+
 # Prepare the Input Paremeters
 [CmdletBinding()]
     Param (
     [Parameter(Mandatory=$true)][ValidateNotNullOrEmpty()][String]$InputFile,
-    [Parameter(Mandatory=$false)][String]$DLLPath="C:\Windows\System32")
+    [Parameter(Mandatory=$false)][String]$LogRootPath="D:\Logs")
 
-# Preparation
-$BaseName = (Get-Item $InputFile).BaseName
-$BasePathName = "$PWD\$BaseName"
+# Import our Custom Events
+$CustomChannels = Import-CSV $InputFile
 
-$CustomEventsDLL = $DLLPath + "\" + $BaseName + ".dll"	# The Resource and Message DLL that will be referenced in the manifest.
-$CustomEventsMAN = "$BasePathName.man"				# The Manifest file
+# Create The Folder
+If(!(Test-Path $LogRootPath )){New-Item -Type Directory $LogRootPath | Out-Null}
 
-# Import the events from the input file and extract the Provider details.
-$CustomEvents = Import-CSV $InputFile
-$Providers = $CustomEvents | Select-Object -Property ProviderSymbol,ProviderName,ProviderGuid -Unique # Extract the provider information from input
+# Add an ACE to allow LOCAL SERVICE to modify the folder
+$ACE = New-Object System.Security.AccessControl.FileSystemAccessRule("LOCAL SERVICE",'Modify','ContainerInherit,ObjectInherit','None','Allow')
+$LogRootPathACL = (Get-Item $LogRootPath) | Get-ACL
+$LogRootPathACL.AddAccessRule($ACE)
+$LogRootPathACL | Set-ACL
 
-# Create The Manifest XML Document
-$XmlWriter = New-Object System.XMl.XmlTextWriter($CustomEventsMAN,$null)
+# Enable NTFS compression to save disk space
+$Query = "select * from CIM_Directory where name = `"$($LogRootPath.Replace('\','\\'))`""
+$Results = Invoke-CimMethod -Query $Query -MethodName Compress
 
-# Set The Formatting
-$xmlWriter.Formatting = "Indented"
-$xmlWriter.Indentation = "4"
+# Loop through Chanell form the InputCSV
+ForEach($Channel in $CustomChannels){	
 
-# Write the XML Decleration
-$xmlWriter.WriteStartDocument()
+	# --- Setup the Event Channels ---
+	# Bind to the Event Channel
+	$EventChannel = Get-WinEvent -ListLog $Channel.ChannelName -ErrorAction "SilentlyContinue"
+	If ($EventChannel -eq $Null){
+		Write-Host "`nError: Event channel not loaded:`"$($Channel.ChannelName)`"" -ForeGroundColor Red
+		Write-Host "`nEnsure the manifest and dll has been loaded with wevtutil.exe im <path to manifest.man>`n" -foregroundColor Green
+	Exit
+	}
 
-# Create Instrumentation Manifest
-$xmlWriter.WriteStartElement("instrumentationManifest")
-$xmlWriter.WriteAttributeString("xsi:schemaLocation","http://schemas.microsoft.com/win/2004/08/events eventman.xsd")
-$xmlWriter.WriteAttributeString("xmlns","http://schemas.microsoft.com/win/2004/08/events")
-$xmlWriter.WriteAttributeString("xmlns:win","http://manifests.microsoft.com/win/2004/08/windows/events")
-$xmlWriter.WriteAttributeString("xmlns:xsi","http://www.w3.org/2001/XMLSchema-instance")
-$xmlWriter.WriteAttributeString("xmlns:xs","http://www.w3.org/2001/XMLSchema")
-$xmlWriter.WriteAttributeString("xmlns:trace","http://schemas.microsoft.com/win/2004/08/events/trace")
-
-# Create Instrumentation, Events and Provider Elements
-$xmlWriter.WriteStartElement("instrumentation")
-	$xmlWriter.WriteStartElement("events")
-	
-	$Providers = $CustomEvents | Select-Object -Property ProviderSymbol,ProviderName,ProviderGuid -Unique
-	ForEach($Provider in $Providers){
-		$xmlWriter.WriteStartElement("provider")
-			$xmlWriter.WriteAttributeString("name",($Provider.ProviderName))
-			$xmlWriter.WriteAttributeString("guid",$Provider.ProviderGUID)
-			$xmlWriter.WriteAttributeString("symbol",$Provider.ProviderSymbol)
-			$xmlWriter.WriteAttributeString("resourceFileName",$CustomEventsDLL)
-			$xmlWriter.WriteAttributeString("messageFileName",$CustomEventsDLL)
-			$xmlWriter.WriteAttributeString("parameterFileName",$CustomEventsDLL)
-			$xmlWriter.WriteStartElement("channels")
-
-			$Channels = $CustomEvents | Where-Object{$_.ProviderSymbol -eq $Provider.ProviderSymbol}
-			ForEach($Channel in $Channels){	
-				$xmlWriter.WriteStartElement("channel")	
-					$xmlWriter.WriteAttributeString("name",$Channel.ChannelName)
-					$xmlWriter.WriteAttributeString("chid",($Channel.ChannelName).Replace(' ',''))
-					$xmlWriter.WriteAttributeString("symbol",$Channel.ChannelSymbol)
-					$xmlWriter.WriteAttributeString("type","Admin")
-					$xmlWriter.WriteAttributeString("enabled","false")
-				$xmlWriter.WriteEndElement() # Closing channel
-				}
-			$xmlWriter.WriteEndElement() # Closing channels
-		$xmlWriter.WriteEndElement() # Closing provider
-	}		
-	$xmlWriter.WriteEndElement() # Closing events
-$xmlWriter.WriteEndElement() # Closing Instrumentation
-$xmlWriter.WriteEndElement()   # Closing instrumentationManifest
- 
-# End the XML Document
-$xmlWriter.WriteEndDocument()
- 
-# Finish The Document
-$xmlWriter.Finalize
-$xmlWriter.Flush()
-$xmlWriter.Close()
-
-# Output the usage instructions
-Write-Host "`nThe manifest file has been generated at `"$CustomEventsMAN`"`n"
-Write-Host "Step 1: With the Windows 10 SDK installed, open a Command Prompt and change directory to the folder with the .man file (This will not work in PowerShell!) `n"
-
-Write-Host "`t `"C:\Program Files (x86)\Windows Kits\10\bin\x64\mc.exe`" `"$CustomEventsMAN`""
-Write-Host "`t `"C:\Program Files (x86)\Windows Kits\10\bin\x64\mc.exe`" -css `"NameSpace`" `"$CustomEventsMAN`""
-Write-Host "`t `"C:\Program Files (x86)\Windows Kits\10\bin\x64\rc.exe`" `"$BasePathName.rc`""
-Write-Host "`t `"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe`" /win32res:`"$BasePathName.res`" /unsafe /target:library /out:`"$BasePathName.dll`" `"$BasePathName.cs`"`n"
-
-Write-Host "Step 2: On the WEC server, copy both the .man and .dll file to $DLLPath"
-Write-Host "Step 3: Load the custom event channels by executing:`n"
-Write-Host "`t `"c:\windows\system32\wevtutil.exe`" im `"$DLLPath\$BaseName.man`"`n"
-
+	# Disable the channel to allow changes
+	If ($EventChannel.IsEnabled) {
+  		$EventChannel.IsEnabled = $False
+		$EventChannel.SaveChanges()
+	}
+    
+	  # Update the channel to our requried Values
+	  $NewLogFilePath = $LogRootPath + "\" + $Channel.ChannelSymbol + ".evtx"
+	  $EventChannel.LogFilePath = $NewLogFilePath
+	  $EventChannel.LogMode = "AutoBackup"
+	  $EventChannel.MaximumSizeInBytes = 1073741824
+	  $EventChannel.SaveChanges()
+      
+    # Enable the Log
+    $EventChannel.IsEnabled = $True	
+    $EventChannel.SaveChanges()
+}
 # -----------------------------------------------------------------------------------
-# Main Script
+# End of Script
 # -----------------------------------------------------------------------------------
 # SIG # Begin signature block
 # MIIgVAYJKoZIhvcNAQcCoIIgRTCCIEECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCClCmr0opDAE+lP
-# 3KmO1Yo/zh3Uyu3u6vT24xFcxuNZ9aCCG14wggO3MIICn6ADAgECAhAM5+DlF9hG
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCeQjMRHWwBGMg0
+# u4WEWqkl6YBDK1kW3ZwEIa7LdxvYwaCCG14wggO3MIICn6ADAgECAhAM5+DlF9hG
 # /o/lYPwb8DA5MA0GCSqGSIb3DQEBBQUAMGUxCzAJBgNVBAYTAlVTMRUwEwYDVQQK
 # EwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xJDAiBgNV
 # BAMTG0RpZ2lDZXJ0IEFzc3VyZWQgSUQgUm9vdCBDQTAeFw0wNjExMTAwMDAwMDBa
@@ -300,22 +257,22 @@ Write-Host "`t `"c:\windows\system32\wevtutil.exe`" im `"$DLLPath\$BaseName.man`
 # U2lnbmluZyBDQQIQDhlON30mOhkOirPIWrUoYzANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCAgSxj3/sCjD2c91lGljGzSQSzSR6JpgbNciSzyWDcFwjANBgkqhkiG9w0BAQEF
-# AASCAQBOZx7FjhF/9BDJADEUgdaXB3tRpnCT9wLLby/LsBNI3Zcq2//ujc4ltmbt
-# i1+fg2IT7nt/IWYS0s/XSMi4DQ0rdT3a/WeMIaQBa7zxytlqUFOmBdMoDc3AB/Nh
-# l4sYYFwSHwWRDhNeNXZ+cb5+GjSBPn9Yy1sRxgC/Uap0VW9e1zRWDJtxpxG9ppWN
-# pEZa8EMdS5s0TNV8bOI3XGu4uUnX5gUSyia1ISc9vls8Lb0wZFqk2wUz1sU2mTep
-# 9n01bXJa0w+N2hunlVWXQUVLWwdU+9BkbS9gprUV4/5zZwqdgzT7aSonEn9U3HDw
-# lM5ZkozbE15nP+qTDQ1wTzUvHELvoYICDzCCAgsGCSqGSIb3DQEJBjGCAfwwggH4
+# BCAoJ3Ugifl5F59BKjDXweFVW5z11Ch8mfqEg/wr2w7P6TANBgkqhkiG9w0BAQEF
+# AASCAQBo7eP+G0VbuTFm3+I0Vs97zSFbX9/IUZKKgVr5cRmIJPLyorPn4DsK4Cu9
+# fyPugt3E5HazZUVXfS0t1fCpfUJ7Y0dMyqyJQdZlkB7qRVcPiKJqIBTv2gJM8tKE
+# RTsiEtpL2uDi/yTtQr593XOa+R+Iv+3kHty/ac2wfBpdHXxj5B7eKv+rpfobc6Ov
+# LzlFC8rvS2LAIxlF4GzmJ5TxLHE2gzaPE+iYHwIsknaWpr9ADiJzdD5lB+e/T+r3
+# qCQpA5aSqsWy7RzwJ7aX3ZPuU1Nye98qRsB85P0L07k5ynjyPyifTYdscVGGowsG
+# RWhV6Uwp396dvrr/GSyV+fiosvYLoYICDzCCAgsGCSqGSIb3DQEJBjGCAfwwggH4
 # AgEBMHYwYjELMAkGA1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcG
 # A1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8GA1UEAxMYRGlnaUNlcnQgQXNzdXJl
 # ZCBJRCBDQS0xAhADAZoCOv9YsWvW1ermF/BmMAkGBSsOAwIaBQCgXTAYBgkqhkiG
-# 9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0xNzA0MDYxMjAwNTFa
-# MCMGCSqGSIb3DQEJBDEWBBQFcCtVgUTgayMN3C3fDrfJxF1SLDANBgkqhkiG9w0B
-# AQEFAASCAQChXxUj0qqDiQZlu0wRdPa/3YLpxT5gORcPNBKkUt7oUTIOzZGytfxN
-# RJFjm40NAPqgEGcdEkDH6WMzZ7eEpE2T96l9d8d5nn3hbyr+OfWGvSJ81WRQ6P0W
-# Gzx9448EEkWa7vTHXSCwVcLFWtYIXGP1o/Ijo94tplLrAR4tYWIrql+ECuy0AEVZ
-# uAfZWdKsZTO43yzAvj/7sODAp2ZrTSnuL7tcGZW9i+7vGuAKOVNPQx6kUd+DsI7+
-# Kz7rchZdZjmcgfmhWnH3RMDxTxTDC8E8waHELEfmpJCEEMhcmE5EiJhUaVcnfQj6
-# Lxy7VK+G+/tXwAaOXcWA2YaQ21HShPW8
+# 9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0xNzA0MDYxMjAwNTJa
+# MCMGCSqGSIb3DQEJBDEWBBQ7GxFbm/id7zUPbivMC9oCc0q/BTANBgkqhkiG9w0B
+# AQEFAASCAQB8PcnzSkBk4/kYQkFDrGOMOf2LSuNihoAqbl2BZTzwXR91y67eyvJS
+# tth/ZuH3EZI3WUAxQB0XboEKmrRP8x21phSNcvzMaUFtm2MZhVPSxDmBrYQumpKw
+# /SryyV4XTFBCr+ngMDGPAv9JX7Mg1GDqdATyfKmyv4UZkJ5qliwKS4xRqyOg3j59
+# WH2T2hOC7FuA2CIeYNPT/yddcdFWpiCZoXa8VFXew5Yki/mUNkP6Pqd3B2egL1qU
+# pX40VtVA0Bpqm7POI2AUmgkcyHsCg5za3jqQktQ73Hqs5n6FwdXEDY4shP+RpL9O
+# 3GbEF/zaPvTXNvbq5AD+9GnPBx7xxcgd
 # SIG # End signature block
