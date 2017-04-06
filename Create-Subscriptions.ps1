@@ -1,27 +1,28 @@
 <#
   .SYNOPSIS
   Name: Create-Subscriptions.ps1
-  Version: 1.0
+  Version: 1.1
   Author: Russell Tomkins - Microsoft Premier Field Engineer
   Blog: https://aka.ms/russellt
 
-  Bulk creation of Windows Event Collection Subscriptions from  input CSV
+  Bulk creation of Windows Event Collection Subscriptions from an input CSV
   Source: https://www.github.com/russelltomkins/ProjectSauron
 
   .DESCRIPTION
   Leverages an input CSV file to bulk create WEC subscriptions for event delivery
-  to dedicated custom event channels
+  to dedicated custom event channels. Subscriptions are imported by disabled by default.
+  Use the -NoImport and -CreateEnabled switches to override the behaviour.
 
   Refer to this blog series for more details
   http://blogs.technet.microsoft.com/russellt/2017/03/23/project-sauron-part-1
 
   .EXAMPLE
-  Create, Import and Enable the WEC subscriptions.
+  Create and Import the WEC subscriptions (disabled by default)
   Create-Subscriptions.ps1 -InputFile DCEvents.csv 
   
   .EXAMPLE
-  Create, Import but don't enable the WEC subscriptions
-  Create-Subscriptions.ps1 -InputFile <inputfile.csv> -CreateDisabled
+  Create, Import and force enable the WEC subscriptions
+  Create-Subscriptions.ps1 -InputFile <inputfile.csv> -CreateEnabled
 
   .EXAMPLE
   Only create the WEC subscription files, do not import them.
@@ -30,14 +31,11 @@
   .PARAMETER InputFile
   A CSV file which must include a ChannelName, ChannelSymbol, QueryPath and the xPath Query itself  
   
-  .PARAMETER LogRootPath
-  The location of .evtx event log files. Defaults to "D:\Logs"  
-
-  .PARAMETER OutputFile
-  The location of the output subscription .xml files. Defaults to "D:\Logs"  
+  .PARAMETER OutputFolder
+  The location of the output subscription .xml files. Defaults to "Subscriptions" under the current folder
   
-  .PARAMETER CreateDisabled
-  Creates and imports the subscriptions, but does not enable it
+  .PARAMETER CreateEnabled
+  Creates and imports the subscriptions but enables them immediately.
 
   .PARAMETER NoImport
   Creates the subscriptions files, but does not import them
@@ -69,20 +67,12 @@
 [CmdletBinding()]
     Param (
     [Parameter(Mandatory=$true)][ValidateNotNullOrEmpty()][String]$InputFile,
-    [Parameter(Mandatory=$false)][String]$LogRootPath="D:\Logs",
     [Parameter(Mandatory=$false)][string]$OutputFolder=$PWD,
-    [Parameter(Mandatory=$false)][Switch]$CreateDisabled,
-	[Parameter(Mandatory=$false)][Switch]$NoImport)
+    [Parameter(Mandatory=$false)][Switch]$CreateEnabled,
+    [Parameter(Mandatory=$false)][Switch]$NoImport)
 
 # Import our Custom Events
 $CustomChannels = Import-CSV $InputFile
-
-# Create and ACL the Log Roots Folder to allow Network Service access.
-If(!(Test-Path $LogRootPath )){New-Item -Type Directory $LogRootPath}
-$ACE = New-Object System.Security.AccessControl.FileSystemAccessRule("LOCAL SERVICE",'Modify','ContainerInherit,ObjectInherit','None','Allow')
-$LogRootPathACL = (Get-Item $LogRootPath) | Get-ACL
-$LogRootPathACL.AddAccessRule($ACE)
-$LogRootPathACL | Set-ACL
 
 # Loop through Chanel in input events.
 ForEach($Channel in $CustomChannels){	
@@ -91,27 +81,19 @@ ForEach($Channel in $CustomChannels){
 	# Bind to the Event Channel
 	$EventChannel = Get-WinEvent -ListLog $Channel.ChannelName
 
-	# Disable the channel to allow changes
-	If ($EventChannel.IsEnabled) {
-		$EventChannel.IsEnabled = $False
-		$EventChannel.SaveChanges()
+	# Do not proceed if we are importing and the logs are still disabled.
+	If(!($NoImport)) {
+		If (!($EventChannel.IsEnabled)) {
+			Write-Host "Error: Event Channel is not Enabled" -Foregroundcolor "Red" -BackGroundColor "Black"
+			Write-host "Execute `"Prepare-EventChannels.ps1`" to configure them prior to creating event subscriptions"-Foregroundcolor "Red" -BackGroundColor "Black"
+		Exit
+		}
 	}
-	
-	# Update the channel to our requried Values
-	$NewLogFilePath = $LogRootPath + "\" + $Channel.ChannelSymbol + ".evtx"
-	$EventChannel.LogFilePath = $NewLogFilePath
-	$EventChannel.LogMode = "AutoBackup"
-	$EventChannel.MaximumSizeInBytes = 1073741824
-	$EventChannel.SaveChanges()
-	
-	# Enable the Log
-	$EventChannel.IsEnabled = $True	
-	$EventChannel.SaveChanges()
 	
 	# --- Create the Subscription XML's
 	# Pre-pend the current Folder path and create the SubFolders
 	$SubscriptionNamePath = $OutputFolder + "\Subscriptions"
-	If(!(Test-Path $SubscriptionNamePath)){New-Item -Type Directory $SubscriptionNamePath}
+	If(!(Test-Path $SubscriptionNamePath)){New-Item -Type Directory $SubscriptionNamePath | Out-Null}
 	
 	# Create our new XML File	
 	$xmlFilePath = $SubscriptionNamePath + "\" + $Channel.ChannelSymbol + ".xml"
@@ -131,11 +113,11 @@ ForEach($Channel in $CustomChannels){
 	$xmlWriter.WriteElementString("SubscriptionId",$Channel.ChannelSymbol)
 	$xmlWriter.WriteElementString("SubscriptionType","SourceInitiated")
 	$xmlWriter.WriteElementString("Description",$Channel.ChannelName)
-	If($CreateDisabled){
-		$xmlWriter.WriteElementString("Enabled","false")
+	If($CreateEnabled){
+		$xmlWriter.WriteElementString("Enabled","true")
 	}
 	Else{ 
-		$xmlWriter.WriteElementString("Enabled","true")
+		$xmlWriter.WriteElementString("Enabled","false")
 	}
 	$xmlWriter.WriteElementString("Uri","http://schemas.microsoft.com/wbem/wsman/1/windows/EventLog")
 	$xmlWriter.WriteElementString("ConfigurationMode","Custom")
