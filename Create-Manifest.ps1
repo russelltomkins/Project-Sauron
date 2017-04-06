@@ -75,7 +75,7 @@ $XmlWriter = New-Object System.XMl.XmlTextWriter($CustomEventsMAN,$null)
 # Set The Formatting
 $xmlWriter.Formatting = "Indented"
 $xmlWriter.Indentation = "4"
- 
+
 # Write the XML Decleration
 $xmlWriter.WriteStartDocument()
 

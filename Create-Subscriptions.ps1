@@ -32,7 +32,7 @@
   A CSV file which must include a ChannelName, ChannelSymbol, QueryPath and the xPath Query itself  
   
   .PARAMETER OutputFolder
-  The location of the output subscription .xml files. Defaults to "Subscriptions" under the current folder
+  The location of the output subscription .xml files. Defaults to "\Subscriptions" under the current folder
   
   .PARAMETER CreateEnabled
   Creates and imports the subscriptions but enables them immediately.
@@ -70,6 +70,14 @@
     [Parameter(Mandatory=$false)][string]$OutputFolder=$PWD,
     [Parameter(Mandatory=$false)][Switch]$CreateEnabled,
     [Parameter(Mandatory=$false)][Switch]$NoImport)
+
+# Configure and Start the Windows Event Collector Services except if we are not importing.
+If (!($NoImport)){
+	# Prepare and Start the Windows Event Collector Service
+	$WECService = Get-Service "Windows Event Collector"
+	$WECService | Set-Service -StartupType "Automatic"
+	$WECService | Start-Service
+}
 
 # Import our Custom Events
 $CustomChannels = Import-CSV $InputFile
@@ -165,6 +173,7 @@ ForEach($Channel in $CustomChannels){
 
 	# Import the subscription to the server
 	If(!($NoImport)){
+			
 		# Import the subscription to the server
 		$command = "C:\Windows\System32\wecutil.exe"
 		$action = "create-subscription"
@@ -174,10 +183,11 @@ ForEach($Channel in $CustomChannels){
 
 # If we didn't import, write out how to import manually
 If($NoImport){
-	write-Host "Event Channels updated with required settings"
 	write-Host "Subscription files located at $SubscriptionNamePath"
-	write-host "Import with wecutil.exe create-subscription <subscription-name>.xml"}
-
+	write-host "Import with `"wecutil.exe create-subscription <subscription-name>.xml`""}
+Else{
+	write-Host "Event Channels created and imported. Use Event Viewer to enable subscriptions."
+}
 # -----------------------------------------------------------------------------------
 # End of Script
 # -----------------------------------------------------------------------------------
