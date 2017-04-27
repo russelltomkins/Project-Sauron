@@ -1,7 +1,7 @@
 <#
   .SYNOPSIS
   Name: Create-Subscriptions.ps1
-  Version: 1.1
+  Version: 1.2
   Author: Russell Tomkins - Microsoft Premier Field Engineer
   Blog: https://aka.ms/russellt
 
@@ -19,11 +19,16 @@
   .EXAMPLE
   Create and Import the WEC subscriptions (disabled by default)
   Create-Subscriptions.ps1 -InputFile DCEvents.csv 
-  
+
   .EXAMPLE
   Create, Import and force enable the WEC subscriptions
   Create-Subscriptions.ps1 -InputFile <inputfile.csv> -CreateEnabled
 
+   .EXAMPLE
+  Create and Import the WEC subscriptions (disabled by default). Tell the server to
+  send existing and new events that that match the subscription
+  Create-Subscriptions.ps1 -InputFile DCEvents.csv -ReadExistingEvents
+  
   .EXAMPLE
   Only create the WEC subscription files, do not import them.
   Create-Subscriptions.ps1 -InputFile <inputfile.csv> -NoImport
@@ -39,6 +44,10 @@
 
   .PARAMETER NoImport
   Creates the subscriptions files, but does not import them
+
+  .PARAMETER ReadExistingEvents
+  Creates the subscriptions files and instructs the servers to send existing events that match the criteria
+  through to the collector.
 
   LEGAL DISCLAIMER
   This Sample Code is provided for the purpose of illustration only and is not
@@ -69,7 +78,8 @@
     [Parameter(Mandatory=$true)][ValidateNotNullOrEmpty()][String]$InputFile,
     [Parameter(Mandatory=$false)][string]$OutputFolder=$PWD,
     [Parameter(Mandatory=$false)][Switch]$CreateEnabled,
-    [Parameter(Mandatory=$false)][Switch]$NoImport)
+    [Parameter(Mandatory=$false)][Switch]$NoImport,
+    [Parameter(Mandatory=$false)][Switch]$ReadExistingEvents)
 
 # Configure and Start the Windows Event Collector Services except if we are not importing.
 If (!($NoImport)){
@@ -145,7 +155,10 @@ ForEach($Channel in $CustomChannels){
 	        	$xmlWriter.WriteCData('<QueryList><Query Id="0" Path="' + $Channel.QueryPath + '">' + $Channel.Query + '</Query></QueryList>')
 		$xmlWriter.WriteEndElement() # Closing Query
 	
-		$xmlWriter.WriteElementString("ReadExistingEvents","True")
+		If (ReadExistingEvents){
+			$xmlWriter.WriteElementString("ReadExistingEvents","True")}
+		Else{
+			$xmlWriter.WriteElementString("ReadExistingEvents","False")}
 		$xmlWriter.WriteElementString("TransportName","HTTP")
 		$xmlWriter.WriteElementString("ContentFormat","events")
 		$xmlWriter.WriteStartElement("locale")	
@@ -194,8 +207,8 @@ Else{
 # SIG # Begin signature block
 # MIIgVAYJKoZIhvcNAQcCoIIgRTCCIEECAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDmRTCSV+qfcL+6
-# pOqLspQirwP7zaAf9qnDaQCuzmm48qCCG14wggO3MIICn6ADAgECAhAM5+DlF9hG
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDtJ3gGV/S5Sv6I
+# 35iCLqR59MWvViYEW9NIcfmEPSC/L6CCG14wggO3MIICn6ADAgECAhAM5+DlF9hG
 # /o/lYPwb8DA5MA0GCSqGSIb3DQEBBQUAMGUxCzAJBgNVBAYTAlVTMRUwEwYDVQQK
 # EwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xJDAiBgNV
 # BAMTG0RpZ2lDZXJ0IEFzc3VyZWQgSUQgUm9vdCBDQTAeFw0wNjExMTAwMDAwMDBa
@@ -347,22 +360,22 @@ Else{
 # U2lnbmluZyBDQQIQDhlON30mOhkOirPIWrUoYzANBglghkgBZQMEAgEFAKCBhDAY
 # BgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3
 # AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEi
-# BCBdRdQcl3uoARDQBCqg/cwdZleMA9onGTt8ho1IDiiCqDANBgkqhkiG9w0BAQEF
-# AASCAQB82JthTsuUn9nAfJm4u94njOdCcya64ThMcwTw6gjtOMmW8lys7gnoxCvB
-# hOBF+DVlOcBp0LUMN4yYZM8M9HxSjZTdQ0efzcEQZRfnhF5MvRyWSwnfG+dhaC2U
-# 26WTx3F9CPiJhZlbbC13jcZmlkGmP+5tY7kXnn+QTIqO9KO4Se9BYkRR8u4lH5JS
-# 3NwEzvyWauHblG5jpAY6gGGb63xl/bC1lc2NEkcRwE+bkPjPyp8k4P4CjGsseouJ
-# VuLqLv8PP2nk1SAoYzTPj3qPLPhi9UuLV9rk4AWTLPbro1qbrGim0LAS9ccKknBG
-# 9NCZa6tmIVjcW5Lql7UKsjmn6wlnoYICDzCCAgsGCSqGSIb3DQEJBjGCAfwwggH4
+# BCBLWOBo2UAxFjk14XSFqoGTOrn/xQNGTzWSap7ffGIgNTANBgkqhkiG9w0BAQEF
+# AASCAQCprQAn7ja7gwPPepxbzj2x91vB6E8qWAiJPd/FoCUbLgW3fPBd/YVcPVR+
+# ZFXwrepAa47oy7ClBq4ZT4ZZqZ1SxkZtyECsrsVSJNLgPkxp5Sfb2p/M7bLyp9Hf
+# cwH2L80JYg/v6u1YgqEWjRluwB9KGl2IYD40krgPcc7vg/lKvB4pSfr4ny62kTnY
+# OwnHCWTIm0B8m04TYF7/Pr0FkU2TO1hZJjIJiSi3ttDK/zO3L2VszDw5y6V4WUi9
+# T2F7+BGZn6Yq4rn7E7gXMg5XOZbIXRIvtZxigQRC/BqPca2RCc/2EHc3R9l8sKHN
+# O7oYSrvYwo48fHkkukthOXVnweVpoYICDzCCAgsGCSqGSIb3DQEJBjGCAfwwggH4
 # AgEBMHYwYjELMAkGA1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcG
 # A1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8GA1UEAxMYRGlnaUNlcnQgQXNzdXJl
 # ZCBJRCBDQS0xAhADAZoCOv9YsWvW1ermF/BmMAkGBSsOAwIaBQCgXTAYBgkqhkiG
-# 9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0xNzA0MDYxMjAwNTNa
-# MCMGCSqGSIb3DQEJBDEWBBQUSafeu49EHQNcvAKNKKEXcURbrjANBgkqhkiG9w0B
-# AQEFAASCAQBt8bsMZ+lx7gSEFFX1I3cRmEsv7JmDxsE8z/SJDd/l9Ua2Tf6hnTnl
-# U6hhIV7VQAEDLq9CaATkug3QjykqDYRWOWHAKZz3ngSulxfN/AQLrZP1tLByxfxW
-# 8pCinR0sIO+jggioo1EcMJeajEEtUrWJU/280MWcEgs8ghlQedfoDPMxxoWwBZv9
-# 2ovdiXp4qTkvq0bMEt/p19doeYeQJC68cFUob2l3MN4bvkFW1AmrmhuRvr3VckY+
-# GglJxeANfnFKHHwjsi6WEWzNY2m7SJUwuaF7PrcAi2eNq9t2rMUpQrBts6xlfrbw
-# 9lOStks/uV58iNSRQfFxEqX1lSHbkO5O
+# 9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0xNzA0MjcxMzIyNTJa
+# MCMGCSqGSIb3DQEJBDEWBBQRkXykh7mEdzFeGqVMG4nSp7CClzANBgkqhkiG9w0B
+# AQEFAASCAQBu6NzSTk5g3J60pRhjstfyvGYMNr9Hm19H2DsrWJr6o+5TZbIvZAGD
+# IemInFkHdjVEbx08zMGr7TfpydlZ0hIrRQ4xb2DR6Xfo/krdEmXtySh4M3cviyKE
+# NFGrxiPdms3nV7jp9hV3S5CN85hiIPqNJjjIiBudG7bj+5QZXeaUnoJSjLxdvHAw
+# LTthTS006wAuq1Bu+7CMTt/eAfGNouL77c7yFTdaP2BELssFzPgo4M4n9wZJvsYT
+# Wgvw+ucWWwe70y2bg0TBgPUf+2oCvfFoa0qEwo1Df9EbLDsZP2AWGlBsxY27ECS3
+# jpOOPycPph0sudEF6unyrHsLX7uGP6Eh
 # SIG # End signature block
