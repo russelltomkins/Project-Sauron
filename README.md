@@ -1,14 +1,15 @@
 Welcome to Project Sauron
 
-The purpose of these project is to provide organisations without access to expenseive SEM/SIEM platforms to export Windows event log audit data from multiple Windows machines to a central location using built-in Windows functionality. The solution is also ideal for deployment in UAT/DEV/TEST environments that aren't currently covered by production SEM/SIEM deployments.
+The purpose of these project is to provide organisations without access to expenseive SIEM platforms to export Windows event log audit data from multiple Windows machines to a central location using built-in Windows functionality. The solution is also ideal for deployment in UAT/DEV/TEST environments that aren't currently covered by production SEM/SIEM deployments.
 
 The catalyst for this project and primary working example was to provide a mechanism to allow Domain Controllers to centrally store and archive the large number of audit events they generate for archival and lookup purposes.
 
+
 The 4 core scripts can be used to build your own solutions as well.
-  Custom View Creation - Create a custom view tree that allows you to easily extract specific events 
-  Manifest Creation - Creates an event channel manifest file for .dll compilation to create dedicated event channels (logs) for storage of events in management .evtx files
-  Event Channel Preparation - Enables the custom event channels, configures their default size and enables auto-archive.
-  Subscription Creation - Creates the windows event collection subscription files to forward and store events in the appproiate log file.
+Custom View Creation - Create a custom view tree that allows you to easily extract specific events 
+Manifest Creation - Creates an event channel manifest file for .dll compilation to create dedicated event channels (logs) for storage of events in management .evtx files
+Event Channel Preparation - Enables the custom event channels, configures their default size and enables auto-archive.
+Subscription Creation - Creates the windows event collection subscription files to forward and store events in the appproiate log file.
 
 Getting Started - DC Events 
 Some people will happily just use the pre-provided solution and thats cool. Check out the latest release for pre-compiled Custom Views, Event Channel manifest and DLL that can quickly be used.
