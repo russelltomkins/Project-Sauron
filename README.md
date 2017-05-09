@@ -1,7 +1,8 @@
+
 Welcome to Project Sauron
 
 For an introduction to Project Sauron and a quick-start using a Domain Controller example, refer to the following blog post.
-http://blogs.technet.microsoft.com/russellt/2017/05/09/project-sauron-part-1
+https://blogs.technet.microsoft.com/russellt/2017/05/09/project-sauron-introduction/
 
 
 The 4 core scripts can be used to build your own solutions as well.
