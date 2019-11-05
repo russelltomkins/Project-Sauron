@@ -9,7 +9,7 @@ The 4 core scripts can be used to build your own solutions as well.
 Create-CustomView.ps1 - Create a custom view tree that allows you to easily extract specific events 
 Create-Manifest.ps1 - Creates an event channel manifest file for .dll compilation to create dedicated event channels (logs) for storage of events in management .evtx files
 Prepare-EventChannel.ps1 - Enables the custom event channels, configures their default size and enables auto-archive.
-Create-Subscriptions.ps1 - Creates the windows event collection subscription files to forward and store events in the appproiate log file.
+Create-Subscriptions.ps1 - Creates the windows event collection subscription files to forward and store events in the apppropriate log file.
 
 Want to create your own?
 
